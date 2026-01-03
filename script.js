@@ -17,7 +17,7 @@ const colors = {
 
 init();
 animate();
-startTimer();
+resetTimer();
 
 function init() {
     scene = new THREE.Scene();
@@ -26,55 +26,56 @@ function init() {
     camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.1, 1000);
     camera.position.set(3, 3, 3);
 
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: false }); // false для мобильных
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     document.body.appendChild(renderer.domElement);
 
     controls = new THREE.OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.enablePan = false;
+    controls.autoRotate = false;
+    controls.autoRotateSpeed = 1.0;
 
     // Освещение
-    const ambient = new THREE.AmbientLight(0xffffff, 0.8);
+    const ambient = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambient);
-    const light = new THREE.DirectionalLight(0xffffff, 0.5);
+    const light = new THREE.DirectionalLight(0xffffff, 0.8);
     light.position.set(5, 5, 5);
     scene.add(light);
 
-    // Создание кубиков
+    // Создание кубиков (26 штук)
     for (let x = -1; x <= 1; x++) {
         for (let y = -1; y <= 1; y++) {
             for (let z = -1; z <= 1; z++) {
                 if (x === 0 && y === 0 && z === 0) continue;
 
-                const materials = [];
-                materials.push(x === 1 ? new THREE.MeshPhongMaterial({ color: colors.red }) : new THREE.MeshPhongMaterial({ color: colors.black }));
-                materials.push(x === -1 ? new THREE.MeshPhongMaterial({ color: colors.orange }) : new THREE.MeshPhongMaterial({ color: colors.black }));
-                materials.push(y === 1 ? new THREE.MeshPhongMaterial({ color: colors.white }) : new THREE.MeshPhongMaterial({ color: colors.black }));
-                materials.push(y === -1 ? new THREE.MeshPhongMaterial({ color: colors.yellow }) : new THREE.MeshPhongMaterial({ color: colors.black }));
-                materials.push(z === 1 ? new THREE.MeshPhongMaterial({ color: colors.green }) : new THREE.MeshPhongMaterial({ color: colors.black }));
-                materials.push(z === -1 ? new THREE.MeshPhongMaterial({ color: colors.blue }) : new THREE.MeshPhongMaterial({ color: colors.black }));
+                const materials = [
+                    new THREE.MeshPhongMaterial({ color: x === 1 ? colors.red : colors.black }),    // +X red
+                    new THREE.MeshPhongMaterial({ color: x === -1 ? colors.orange : colors.black }), // -X orange
+                    new THREE.MeshPhongMaterial({ color: y === 1 ? colors.white : colors.black }),   // +Y white
+                    new THREE.MeshPhongMaterial({ color: y === -1 ? colors.yellow : colors.black }), // -Y yellow
+                    new THREE.MeshPhongMaterial({ color: z === 1 ? colors.green : colors.black }),   // +Z green
+                    new THREE.MeshPhongMaterial({ color: z === -1 ? colors.blue : colors.black })    // -Z blue
+                ];
 
-                const geometry = new THREE.BoxGeometry(size, size, size);
+                const geometry = new THREE.BoxGeometry(size * 0.95, size * 0.95, size * 0.95); // Чуть меньше для швов
                 const cubelet = new THREE.Mesh(geometry, materials);
                 cubelet.position.set(x * size, y * size, z * size);
                 scene.add(cubelet);
                 cube.push(cubelet);
             }
+        }
     }
 
-    // Обработка ресайза
+    // Ресайз
     window.addEventListener('resize', onWindowResize);
 
     // Кнопки
     document.getElementById('scramble').onclick = scramble;
     document.getElementById('reset').onclick = resetCube;
-    document.getElementById('fullscreen').onclick = () => {
-        if (document.fullscreenElement) document.exitFullscreen();
-        else document.documentElement.requestFullscreen();
-    };
+    document.getElementById('fullscreen').onclick = toggleFullscreen;
 }
 
 function onWindowResize() {
@@ -89,27 +90,48 @@ function animate() {
     renderer.render(scene, camera);
 }
 
+function getLayerPos(mesh, axis) {
+    const pos = mesh.position;
+    switch (axis) {
+        case 'x': return Math.round(pos.x);
+        case 'y': return Math.round(pos.y);
+        case 'z': return Math.round(pos.z);
+    }
+    return 0;
+}
+
+function getAxisVector(axis) {
+    switch (axis) {
+        case 'x': return new THREE.Vector3(1, 0, 0);
+        case 'y': return new THREE.Vector3(0, 1, 0);
+        case 'z': return new THREE.Vector3(0, 0, 1);
+    }
+    return new THREE.Vector3(0, 0, 0);
+}
+
 function rotateLayer(axis, index, direction = 1) {
     const group = new THREE.Group();
     cube.forEach(c => {
-        if (Math.round(c.position[axis]) === index) {
+        if (getLayerPos(c, axis) === index) {
             scene.remove(c);
             group.add(c);
         }
     });
+    if (group.children.length === 0) return;
     scene.add(group);
 
     const angle = direction * Math.PI / 2;
-    const tween = new TWEEN.Tween({ rot: 0 })
-        .to({ rot: angle }, 300)
-        .easing(TWEEN.Easing.Cubic.Out)
-        .onUpdate(obj => {
-            group.rotation[axis] = obj.rot;
+    const tweenObj = { rot: 0 };
+    new TWEEN.Tween(tweenObj)
+        .to({ rot: angle }, 400)
+        .onUpdate(() => {
+            group.rotation[axis] = tweenObj.rot;
         })
         .onComplete(() => {
+            const axisVec = getAxisVector(axis);
             group.children.forEach(c => {
                 group.remove(c);
-                c.position.applyAxisAngle(new THREE.Vector3(...[0,0,0].map((_,i)=> i===parseInt(axis)?1:0)), angle);
+                c.position.applyAxisAngle(axisVec, angle);
                 c.rotation[axis] += angle;
                 scene.add(c);
             });
@@ -120,68 +142,87 @@ function rotateLayer(axis, index, direction = 1) {
         .start();
 }
 
-// Touch/мышь для поворота граней (упрощённый raycaster)
+// Свайпы для поворота граней
 let startX, startY;
-renderer.domElement.addEventListener('pointerdown', e => {
+renderer.domElement.addEventListener('pointerdown', (e) => {
     startX = e.clientX;
     startY = e.clientY;
 });
-renderer.domElement.addEventListener('pointerup', e => {
+renderer.domElement.addEventListener('pointerup', (e) => {
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
-    if (Math.abs(dx) < 10 && Math.abs(dy) < 10) return; // не клик
+    if (Math.abs(dx) < 25 && Math.abs(dy) < 25) return;
 
-    const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2(
         (e.clientX / window.innerWidth) * 2 - 1,
         -(e.clientY / window.innerHeight) * 2 + 1
     );
+    const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, camera);
     const intersects = raycaster.intersectObjects(cube);
-    if (intersects.length > 0) {
-        const pos = intersects[0].object.position;
-        if (Math.abs(dx) > Math.abs(dy)) {
-            // горизонтальный свайп
-            rotateLayer('y', Math.round(pos.y), dx > 0 ? 1 : -1);
-        } else {
-            // вертикальный свайп
-            rotateLayer('x', Math.round(pos.x), dy > 0 ? -1 : 1);
-        }
+    if (intersects.length === 0) return;
+
+    const pos = intersects[0].object.position;
+    if (Math.abs(dx) > Math.abs(dy)) {
+        // Горизонтальный свайп -> слой Y
+        rotateLayer('y', getLayerPos(intersects[0].object, 'y'), dx > 0 ? -1 : 1);
+    } else {
+        // Вертикальный свайп -> слой X
+        rotateLayer('x', getLayerPos(intersects[0].object, 'x'), dy > 0 ? 1 : -1);
     }
 });
 
 function scramble() {
-    moves = 0;
-    document.getElementById('moves').textContent = 0;
-    const movesCount = 20;
+    resetCube();
+    const movesCount = 25;
+    let delay = 0;
     for (let i = 0; i < movesCount; i++) {
-        const axis = ['x','y','z'][Math.floor(Math.random()*3)];
-        const index = [-1,0,1][Math.floor(Math.random()*3)];
+        const axes = ['x', 'y', 'z'];
+        const axis = axes[Math.floor(Math.random() * 3)];
+        const indices = [-1, 0, 1];
+        const index = indices[Math.floor(Math.random() * 3)];
         const dir = Math.random() > 0.5 ? 1 : -1;
-        setTimeout(() => rotateLayer(axis, index, dir), i * 100);
+        setTimeout(() => rotateLayer(axis, index, dir), delay);
+        delay += 150; // Последовательный скрэмбл без сильных оверлеев
     }
 }
 
 function resetCube() {
-    location.reload(); // простой сброс
+    cube.forEach(c => {
+        c.position.set(Math.round(c.position.x), Math.round(c.position.y), Math.round(c.position.z));
+        c.rotation.set(0, 0, 0);
+    });
+    moves = 0;
+    document.getElementById('moves').textContent = 0;
+    resetTimer();
 }
 
-function startTimer() {
+function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen();
+    } else {
+        document.exitFullscreen();
+    }
+}
+
+function resetTimer() {
+    clearInterval(timerInterval);
     startTime = Date.now();
-    timerInterval = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const min = Math.floor(elapsed / 60).toString().padStart(2, '0');
-        const sec = (elapsed % 60).toString().padStart(2, '0');
-        document.getElementById('time').textContent = `${min}:${sec}`;
-    }, 500);
+    updateTimer();
+    timerInterval = setInterval(updateTimer, 100);
 }
 
-// TWEEN для анимации (встроен в примеры Three.js, но добавим простой)
+function updateTimer() {
+    const elapsed = Math.floor((Date.now() - startTime) / 1000);
+    const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
+    const secs = (elapsed % 60).toString().padStart(2, '0');
+    document.getElementById('time').textContent = `${mins}:${secs}`;
+}
+
+// Исправленный кастомный TWEEN (с easing и правильным timing)
 const TWEEN = {
-    Easing: { Cubic: { Out: t => 1 - Math.pow(1 - t, 3) } },
-    Tween: function(obj) {
-        this._object = obj;
-        this._startTime = Date.now();
+    Tween: function (object) {
+        this._object = object;
         this._duration = 0;
         this._to = {};
         this._onUpdate = null;
@@ -189,25 +230,43 @@ const TWEEN = {
         return this;
     }
 };
-TWEEN.Tween.prototype.to = function(to, duration) { this._to = to; this._duration = duration; return this; };
-TWEEN.Tween.prototype.easing = function() { return this; };
-TWEEN.Tween.prototype.onUpdate = function(cb) { this._onUpdate = cb; return this; };
-TWEEN.Tween.prototype.onComplete = function(cb) { this._onComplete = cb; return this; };
-TWEEN.Tween.prototype.start = function() {
-    this._start = { ...this._object };
-    const update = () => {
-        const time = Math.min((Date.now() - this._startTime) / this._duration, 1);
-        if (time >= 1) {
-            Object.assign(this._object, this._to);
-            if (this._onUpdate) this._onUpdate(this._object);
-            if (this._onComplete) this._onComplete();
-        } else {
+
+TWEEN.Tween.prototype = {
+    to: function (to, duration) {
+        this._to = to;
+        this._duration = duration;
+        return this;
+    },
+    onUpdate: function (cb) {
+        this._onUpdate = cb;
+        return this;
+    },
+    onComplete: function (cb) {
+        this._onComplete = cb;
+        return this;
+    },
+    start: function () {
+        this._startTime = Date.now();
+        this._start = { ...this._object };
+
+        const update = () => {
+            const elapsed = Date.now() - this._startTime;
+            let time = Math.min(elapsed / this._duration, 1);
+            const eased = 1 - Math.pow(1 - time, 3); // Cubic.Out
+
+            if (time >= 1) {
+                Object.assign(this._object, this._to);
+                if (this._onUpdate) this._onUpdate(this._object);
+                if (this._onComplete) this._onComplete();
+                return;
+            }
+
             for (let key in this._to) {
-                this._object[key] = this._start[key] + (this._to[key] - this._start[key]) * time; // linear для простоты
+                this._object[key] = this._start[key] + (this._to[key] - this._start[key]) * eased;
             }
             if (this._onUpdate) this._onUpdate(this._object);
             requestAnimationFrame(update);
-        }
-    };
-    update();
+        };
+        update();
+    }
 };
